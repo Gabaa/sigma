@@ -1,6 +1,10 @@
-use crate::{ProverProtocol, SigmaProtocol, VerifierProtocol};
+use crate::{ProverProtocol, SigmaProtocol, Simulator, VerifierProtocol};
 
-use num_bigint::{BigInt, RandBigInt};
+use num::integer::Integer;
+use num::{
+    bigint::{BigInt, RandBigInt},
+    Zero,
+};
 
 #[derive(Debug, Clone)]
 pub struct SchnorrDiscreteLogInstance {
@@ -12,7 +16,9 @@ pub struct SchnorrDiscreteLogInstance {
 
 pub struct SchnorrDiscreteLogProtocol {}
 
-impl SigmaProtocol<SchnorrProverProtocol, SchnorrVerifierProtocol> for SchnorrDiscreteLogProtocol {
+impl SigmaProtocol<SchnorrProverProtocol, SchnorrVerifierProtocol, SchnorrSimulator>
+    for SchnorrDiscreteLogProtocol
+{
     type X = SchnorrDiscreteLogInstance;
     type W = BigInt;
     type A = BigInt;
@@ -96,16 +102,38 @@ impl VerifierProtocol<SchnorrDiscreteLogInstance, BigInt, BigInt, BigInt>
     }
 }
 
+pub struct SchnorrSimulator {}
+
+impl Simulator<SchnorrDiscreteLogInstance, BigInt, BigInt, BigInt> for SchnorrSimulator {
+    fn generate(
+        &self,
+        instance: SchnorrDiscreteLogInstance,
+        challenge: BigInt,
+    ) -> (BigInt, BigInt) {
+        let mut rng = rand::thread_rng();
+        let z = rng.gen_bigint_range(&BigInt::zero(), &instance.p);
+
+        // Calculate h^{-e} as (h^{-1})^{e}
+        let h_inv = instance.h.extended_gcd(&instance.p).x;
+        let h_pow_neg_e = h_inv.modpow(&challenge, &instance.p);
+
+        let a = instance.g.modpow(&z, &instance.p) * h_pow_neg_e;
+
+        (a, z)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::{ProverProtocol, VerifierProtocol};
+    use crate::{ProverProtocol, Simulator, VerifierProtocol};
 
     use super::{
-        BigInt, SchnorrDiscreteLogInstance, SchnorrProverProtocol, SchnorrVerifierProtocol,
+        BigInt, SchnorrDiscreteLogInstance, SchnorrProverProtocol, SchnorrSimulator,
+        SchnorrVerifierProtocol,
     };
 
     #[test]
-    fn it_works() {
+    fn honest_run_is_accepted() {
         let p = BigInt::from(1907);
         let q = BigInt::from(953);
         let g = BigInt::from(343);
@@ -120,6 +148,22 @@ mod tests {
         let a = prover.initial_message();
         let e = verifier.challenge();
         let z = prover.challenge_response(e.clone());
+        assert!(verifier.check(a, e, z).is_ok())
+    }
+
+    #[test]
+    fn simulator_is_accepted() {
+        let p = BigInt::from(1907);
+        let q = BigInt::from(953);
+        let g = BigInt::from(343);
+        let h = BigInt::from(862);
+        let instance = SchnorrDiscreteLogInstance { p, q, g, h };
+
+        let sim = SchnorrSimulator {};
+        let e = BigInt::from(675);
+        let (a, z) = sim.generate(instance.clone(), e.clone());
+
+        let verifier = SchnorrVerifierProtocol::new(instance);
         assert!(verifier.check(a, e, z).is_ok())
     }
 }

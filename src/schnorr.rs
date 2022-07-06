@@ -1,4 +1,4 @@
-use crate::{ProverProtocol, SigmaProtocol, Simulator, VerifierProtocol};
+use crate::SigmaProtocol;
 
 use num::integer::Integer;
 use num::{
@@ -14,29 +14,19 @@ pub struct SchnorrDiscreteLogInstance {
     h: BigInt,
 }
 
-pub struct SchnorrDiscreteLogProtocol {}
-
-impl SigmaProtocol<SchnorrProverProtocol, SchnorrVerifierProtocol, SchnorrSimulator>
-    for SchnorrDiscreteLogProtocol
-{
-    type X = SchnorrDiscreteLogInstance;
-    type W = BigInt;
-    type A = BigInt;
-    type E = BigInt;
-    type Z = BigInt;
-}
-
-pub struct SchnorrProverProtocol {
+pub struct SchnorrDiscreteLogProtocol {
     instance: SchnorrDiscreteLogInstance,
-    witness: BigInt,
+    witness: Option<BigInt>,
     random_exponent: Option<BigInt>,
 }
 
-impl ProverProtocol<SchnorrDiscreteLogInstance, BigInt, BigInt, BigInt, BigInt>
-    for SchnorrProverProtocol
+impl SigmaProtocol<SchnorrDiscreteLogInstance, BigInt, BigInt, BigInt, BigInt>
+    for SchnorrDiscreteLogProtocol
 {
-    fn new(instance: SchnorrDiscreteLogInstance, witness: BigInt) -> Self {
-        SchnorrProverProtocol {
+    type VerifierError = ();
+
+    fn new(instance: SchnorrDiscreteLogInstance, witness: Option<BigInt>) -> Self {
+        SchnorrDiscreteLogProtocol {
             instance,
             witness,
             random_exponent: None,
@@ -53,28 +43,6 @@ impl ProverProtocol<SchnorrDiscreteLogInstance, BigInt, BigInt, BigInt, BigInt>
         a
     }
 
-    fn challenge_response(self, challenge: BigInt) -> BigInt {
-        let r = self
-            .random_exponent
-            .expect("Random exponent 'r' not yet defined.");
-
-        (r + challenge * self.witness).modpow(&BigInt::from(1), &self.instance.q)
-    }
-}
-
-pub struct SchnorrVerifierProtocol {
-    instance: SchnorrDiscreteLogInstance,
-}
-
-impl VerifierProtocol<SchnorrDiscreteLogInstance, BigInt, BigInt, BigInt>
-    for SchnorrVerifierProtocol
-{
-    type VerifierError = ();
-
-    fn new(instance: SchnorrDiscreteLogInstance) -> Self {
-        SchnorrVerifierProtocol { instance }
-    }
-
     fn challenge(&self) -> BigInt {
         let t = BigInt::from(self.instance.q.bits() - 1);
         // TODO: Maybe check that this is valid
@@ -82,6 +50,19 @@ impl VerifierProtocol<SchnorrDiscreteLogInstance, BigInt, BigInt, BigInt>
 
         let mut rng = rand::thread_rng();
         rng.gen_bigint_range(&BigInt::from(0), &ubound)
+    }
+
+    fn challenge_response(&self, challenge: &BigInt) -> BigInt {
+        let r = self
+            .random_exponent
+            .as_ref()
+            .expect("Random exponent 'r' is not yet defined.");
+        let w = self
+            .witness
+            .as_ref()
+            .expect("Witness 'w' is not yet defined.");
+
+        (r + challenge * w).modpow(&BigInt::from(1), &self.instance.q)
     }
 
     fn check(
@@ -100,24 +81,19 @@ impl VerifierProtocol<SchnorrDiscreteLogInstance, BigInt, BigInt, BigInt>
             Err(())
         }
     }
-}
 
-pub struct SchnorrSimulator {}
+    fn simulate(&self, challenge: &BigInt) -> (BigInt, BigInt) {
+        let p = &self.instance.p;
 
-impl Simulator<SchnorrDiscreteLogInstance, BigInt, BigInt, BigInt> for SchnorrSimulator {
-    fn generate(
-        &self,
-        instance: SchnorrDiscreteLogInstance,
-        challenge: BigInt,
-    ) -> (BigInt, BigInt) {
         let mut rng = rand::thread_rng();
-        let z = rng.gen_bigint_range(&BigInt::zero(), &instance.p);
+        let z = rng.gen_bigint_range(&BigInt::zero(), p);
 
         // Calculate h^{-e} as (h^{-1})^{e}
-        let h_inv = instance.h.extended_gcd(&instance.p).x;
-        let h_pow_neg_e = h_inv.modpow(&challenge, &instance.p);
+        let h_inv = self.instance.h.extended_gcd(p).x;
+        let h_pow_neg_e = h_inv.modpow(challenge, p);
 
-        let a = instance.g.modpow(&z, &instance.p) * h_pow_neg_e;
+        let g = &self.instance.g;
+        let a = g.modpow(&z, p) * h_pow_neg_e;
 
         (a, z)
     }
@@ -125,12 +101,9 @@ impl Simulator<SchnorrDiscreteLogInstance, BigInt, BigInt, BigInt> for SchnorrSi
 
 #[cfg(test)]
 mod tests {
-    use crate::{ProverProtocol, Simulator, VerifierProtocol};
+    use crate::SigmaProtocol;
 
-    use super::{
-        BigInt, SchnorrDiscreteLogInstance, SchnorrProverProtocol, SchnorrSimulator,
-        SchnorrVerifierProtocol,
-    };
+    use super::{BigInt, SchnorrDiscreteLogInstance, SchnorrDiscreteLogProtocol};
 
     #[test]
     fn honest_run_is_accepted() {
@@ -142,13 +115,8 @@ mod tests {
         let h = g.modpow(&w, &p);
         let instance = SchnorrDiscreteLogInstance { p, q, g, h };
 
-        let mut prover = SchnorrProverProtocol::new(instance.clone(), w);
-        let verifier = SchnorrVerifierProtocol::new(instance);
-
-        let a = prover.initial_message();
-        let e = verifier.challenge();
-        let z = prover.challenge_response(e.clone());
-        assert!(verifier.check(a, e, z).is_ok())
+        let mut protocol = SchnorrDiscreteLogProtocol::new(instance, Some(w));
+        assert!(protocol.run_protocol().is_ok())
     }
 
     #[test]
@@ -159,11 +127,10 @@ mod tests {
         let h = BigInt::from(862);
         let instance = SchnorrDiscreteLogInstance { p, q, g, h };
 
-        let sim = SchnorrSimulator {};
         let e = BigInt::from(675);
-        let (a, z) = sim.generate(instance.clone(), e.clone());
+        let protocol = SchnorrDiscreteLogProtocol::new(instance, None);
+        let (a, z) = protocol.simulate(&e);
 
-        let verifier = SchnorrVerifierProtocol::new(instance);
-        assert!(verifier.check(a, e, z).is_ok())
+        assert!(protocol.check(a, e, z).is_ok())
     }
 }

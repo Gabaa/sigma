@@ -1,4 +1,4 @@
-use crate::{ProverProtocol, SigmaProtocol, VerifierProtocol};
+use crate::SigmaProtocol;
 
 // pub struct OrProtocol<S, P, V>
 // where

@@ -1,8 +1,8 @@
 use crate::SigmaProtocol;
 
-use num::integer::Integer;
 use num::{
     bigint::{BigInt, RandBigInt},
+    integer::Integer,
     Zero,
 };
 
@@ -14,16 +14,27 @@ pub struct SchnorrDiscreteLogInstance {
     h: BigInt,
 }
 
+impl SchnorrDiscreteLogInstance {
+    pub fn new(p: BigInt, q: BigInt, g: BigInt, h: BigInt) -> Self {
+        SchnorrDiscreteLogInstance { p, q, g, h }
+    }
+}
+
 pub struct SchnorrDiscreteLogProtocol {
     instance: SchnorrDiscreteLogInstance,
     witness: Option<BigInt>,
     random_exponent: Option<BigInt>,
 }
 
+#[derive(Debug)]
+pub enum SchnorrVerifierError {
+    ExpressionsNotEqual { lhs: BigInt, rhs: BigInt },
+}
+
 impl SigmaProtocol<SchnorrDiscreteLogInstance, BigInt, BigInt, BigInt, BigInt>
     for SchnorrDiscreteLogProtocol
 {
-    type VerifierError = ();
+    type VerifierError = SchnorrVerifierError;
 
     fn new(instance: SchnorrDiscreteLogInstance, witness: Option<BigInt>) -> Self {
         SchnorrDiscreteLogProtocol {
@@ -72,13 +83,13 @@ impl SigmaProtocol<SchnorrDiscreteLogInstance, BigInt, BigInt, BigInt, BigInt>
         response: BigInt,
     ) -> Result<(), Self::VerifierError> {
         let lhs = self.instance.g.modpow(&response, &self.instance.p);
-        let rhs = (initial_msg * self.instance.h.modpow(&challenge, &self.instance.p))
-            .modpow(&BigInt::from(1), &self.instance.p);
+        let rhs = (&initial_msg * self.instance.h.modpow(&challenge, &self.instance.p))
+            .mod_floor(&self.instance.p);
 
         if lhs == rhs {
             Ok(())
         } else {
-            Err(())
+            Err(SchnorrVerifierError::ExpressionsNotEqual { lhs, rhs })
         }
     }
 
@@ -93,7 +104,7 @@ impl SigmaProtocol<SchnorrDiscreteLogInstance, BigInt, BigInt, BigInt, BigInt>
         let h_pow_neg_e = h_inv.modpow(challenge, p);
 
         let g = &self.instance.g;
-        let a = g.modpow(&z, p) * h_pow_neg_e;
+        let a = (g.modpow(&z, p) * h_pow_neg_e).mod_floor(&self.instance.p);
 
         (a, z)
     }

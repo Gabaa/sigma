@@ -85,7 +85,12 @@ where
     }
 
     fn simulate(&self, challenge: &E) -> ((A, A), (E, Z, E, Z)) {
-        todo!()
+        let e0 = self.protocols.0.challenge();
+        let e1 = challenge.clone() ^ e0.clone();
+        let (a0, z0) = self.protocols.0.simulate(&e0);
+        let (a1, z1) = self.protocols.1.simulate(&e1);
+
+        ((a0, a1), (e0, z0, e1, z1))
     }
 }
 

@@ -18,6 +18,11 @@ impl SchnorrDiscreteLogInstance {
     pub fn new(p: BigInt, q: BigInt, g: BigInt, h: BigInt) -> Self {
         SchnorrDiscreteLogInstance { p, q, g, h }
     }
+
+    /// Generate a Schnorr protocol instance and a corresponding witness.
+    pub fn generate() -> (Self, BigInt) {
+        todo!()
+    }
 }
 
 pub struct SchnorrDiscreteLogProtocol {

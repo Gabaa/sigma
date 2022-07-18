@@ -1,4 +1,5 @@
 pub mod or;
+pub mod remote;
 pub mod schnorr;
 
 pub trait SigmaProtocol<X, W, A, E, Z> {

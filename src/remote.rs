@@ -1,3 +1,10 @@
+use std::{
+    io::{self, Read, Write},
+    net::TcpStream,
+};
+
+use serde::{de::DeserializeOwned, Serialize};
+
 pub use remote_prover::{
     Protocol as RemoteProverProtocol, ProtocolError as RemoteProverProtocolError,
 };
@@ -5,130 +12,183 @@ pub use remote_verifier::{
     Protocol as RemoteVerifierProtocol, ProtocolError as RemoteVerifierProtocolError,
 };
 
-mod remote_verifier {
-    use std::io;
+fn read_value_from_stream<T: DeserializeOwned>(stream: &mut TcpStream) -> io::Result<T> {
+    // Each value is prefixed by 4 bytes specifying the length.
+    let mut buf = [0; 4];
+    stream.read_exact(&mut buf)?;
+    let length = u32::from_be_bytes(buf);
 
-    use serde::Serialize;
+    let mut data = vec![0; length as usize];
+    stream.read_exact(&mut data)?;
+    let s = String::from_utf8(data).map_err(|r| io::Error::new(io::ErrorKind::InvalidData, r))?;
+
+    let val: T = serde_json::from_str(&s)?;
+    Ok(val)
+}
+
+fn write_value_to_stream<T: Serialize>(stream: &mut TcpStream, value: &T) -> io::Result<()> {
+    let s = serde_json::to_string(value)?;
+    let data = s.as_bytes();
+    let length = data.len() as u32;
+
+    stream.write_all(&length.to_be_bytes())?;
+    stream.write_all(data)?;
+    Ok(())
+}
+
+mod remote_verifier {
+    use std::net::TcpStream;
+
+    use serde::{de::DeserializeOwned, Serialize};
 
     use crate::SigmaProtocol;
 
+    use super::{read_value_from_stream, write_value_to_stream};
+
     pub struct Protocol<P> {
         protocol: P,
+        stream: TcpStream,
     }
 
     pub enum ProtocolError<VError> {
         SubProtocolError(VError),
-        NetworkError(io::Error),
     }
 
-    impl<P, X, W, A, E, Z> SigmaProtocol<X, W, A, E, Z> for Protocol<P>
+    impl<P, X, W, A, E, Z> SigmaProtocol<(X, TcpStream), W, A, E, Z> for Protocol<P>
     where
         P: SigmaProtocol<X, W, A, E, Z>,
-        A: Serialize,
-        E: Serialize,
-        Z: Serialize,
+        X: Serialize + DeserializeOwned,
+        A: Serialize + DeserializeOwned,
+        E: Serialize + DeserializeOwned,
+        Z: Serialize + DeserializeOwned,
     {
-        type VerifierError = ProtocolError<P::VerifierError>;
+        // TODO: Would be nice if this was the actual error
+        type VerifierError = ();
 
-        fn new(instance: X, witness: Option<W>) -> Self {
+        fn new(instance: (X, TcpStream), witness: Option<W>) -> Self {
+            // TODO: I don't like having the stream be part of the instance. Is there another way?
             Protocol {
-                protocol: P::new(instance, witness),
+                protocol: P::new(instance.0, witness),
+                stream: instance.1,
             }
         }
 
         fn initial_message(&mut self) -> A {
             let a = self.protocol.initial_message();
-            // TODO: Send to prover, need the address or stream (part of instance???)
+            write_value_to_stream(&mut self.stream, &a).unwrap();
             a
         }
 
-        fn challenge(&self) -> E {
-            // TODO
-            todo!()
+        fn challenge(&mut self) -> E {
+            read_value_from_stream(&mut self.stream).unwrap()
         }
 
-        fn challenge_response(&self, challenge: &E) -> Z {
-            // TODO
-            todo!()
+        fn challenge_response(&mut self, challenge: &E) -> Z {
+            let z = self.protocol.challenge_response(challenge);
+            write_value_to_stream(&mut self.stream, &z).unwrap();
+            z
         }
 
-        fn check(
-            &self,
-            initial_msg: A,
-            challenge: E,
-            response: Z,
-        ) -> Result<(), Self::VerifierError> {
-            // TODO
-            todo!()
+        fn check(&mut self, _: A, _: E, _: Z) -> Result<(), Self::VerifierError> {
+            let accepted: bool = read_value_from_stream(&mut self.stream).unwrap();
+            if accepted {
+                Ok(())
+            } else {
+                Err(())
+            }
         }
 
-        fn simulate(&self, challenge: &E) -> (A, Z) {
-            // TODO
-            todo!()
+        fn simulate(&mut self, challenge: &E) -> (A, Z) {
+            self.protocol.simulate(challenge)
         }
     }
 }
 
 mod remote_prover {
-    use std::io;
+    use std::net::TcpStream;
 
-    use serde::Serialize;
+    use serde::{de::DeserializeOwned, Serialize};
 
     use crate::SigmaProtocol;
 
+    use super::{read_value_from_stream, write_value_to_stream};
+
     pub struct Protocol<P> {
         protocol: P,
+        stream: TcpStream,
     }
 
     pub enum ProtocolError<VError> {
         SubProtocolError(VError),
-        NetworkError(io::Error),
     }
 
-    impl<P, X, W, A, E, Z> SigmaProtocol<X, W, A, E, Z> for Protocol<P>
+    impl<P, X, W, A, E, Z> SigmaProtocol<(X, TcpStream), W, A, E, Z> for Protocol<P>
     where
         P: SigmaProtocol<X, W, A, E, Z>,
-        A: Serialize,
-        E: Serialize,
-        Z: Serialize,
+        X: Serialize + DeserializeOwned,
+        A: Serialize + DeserializeOwned,
+        E: Serialize + DeserializeOwned,
+        Z: Serialize + DeserializeOwned,
     {
         type VerifierError = ProtocolError<P::VerifierError>;
 
-        fn new(instance: X, _: Option<W>) -> Self {
+        fn new(mut instance: (X, TcpStream), _: Option<W>) -> Self {
             Protocol {
-                protocol: P::new(instance, None),
+                protocol: P::new(instance.0, None),
+                stream: instance.1,
             }
         }
 
         fn initial_message(&mut self) -> A {
-            // TODO
-            let a = self.protocol.initial_message();
-            a
+            read_value_from_stream(&mut self.stream).unwrap()
         }
 
-        fn challenge(&self) -> E {
-            // TODO
-            todo!()
+        fn challenge(&mut self) -> E {
+            let e = self.protocol.challenge();
+            write_value_to_stream(&mut self.stream, &e).unwrap();
+            e
         }
 
-        fn challenge_response(&self, challenge: &E) -> Z {
-            // TODO
-            todo!()
+        fn challenge_response(&mut self, _: &E) -> Z {
+            read_value_from_stream(&mut self.stream).unwrap()
         }
 
         fn check(
-            &self,
+            &mut self,
             initial_msg: A,
             challenge: E,
             response: Z,
         ) -> Result<(), Self::VerifierError> {
-            // TODO
-            todo!()
+            let res = self
+                .protocol
+                .check(initial_msg, challenge, response)
+                .map_err(ProtocolError::SubProtocolError);
+            write_value_to_stream(&mut self.stream, &res.is_ok()).unwrap();
+            res
         }
 
-        fn simulate(&self, challenge: &E) -> (A, Z) {
-            // TODO
-            todo!()
+        fn simulate(&mut self, challenge: &E) -> (A, Z) {
+            self.protocol.simulate(challenge)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{io, net::TcpListener, thread};
+
+    use crate::schnorr::SchnorrDiscreteLogInstance;
+
+    use super::{RemoteProverProtocol, RemoteVerifierProtocol};
+
+    #[test]
+    #[ignore = "until implemented"]
+    fn honest_run_works_locally() -> io::Result<()> {
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        let prover_addr = listener.local_addr();
+
+        let instance = SchnorrDiscreteLogInstance::generate(256, 64);
+
+        todo!("start a stream, maybe with two threads, run verifier in one and prover in other")
     }
 }

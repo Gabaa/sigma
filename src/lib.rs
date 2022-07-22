@@ -7,10 +7,15 @@ pub trait SigmaProtocol<X, W, A, E, Z> {
 
     fn new(instance: X, witness: Option<W>) -> Self;
     fn initial_message(&mut self) -> A;
-    fn challenge(&self) -> E;
-    fn challenge_response(&self, challenge: &E) -> Z;
-    fn check(&self, initial_msg: A, challenge: E, response: Z) -> Result<(), Self::VerifierError>;
-    fn simulate(&self, challenge: &E) -> (A, Z);
+    fn challenge(&mut self) -> E;
+    fn challenge_response(&mut self, challenge: &E) -> Z;
+    fn check(
+        &mut self,
+        initial_msg: A,
+        challenge: E,
+        response: Z,
+    ) -> Result<(), Self::VerifierError>;
+    fn simulate(&mut self, challenge: &E) -> (A, Z);
 
     fn run_protocol(&mut self) -> Result<(), Self::VerifierError> {
         let a = self.initial_message();

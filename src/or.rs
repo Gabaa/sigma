@@ -40,11 +40,11 @@ where
         (a0, a1)
     }
 
-    fn challenge(&self) -> E {
+    fn challenge(&mut self) -> E {
         self.protocols.0.challenge()
     }
 
-    fn challenge_response(&self, challenge: &E) -> (E, Z, E, Z) {
+    fn challenge_response(&mut self, challenge: &E) -> (E, Z, E, Z) {
         let (e1, z1) = self
             .chosen_values
             .as_ref()
@@ -57,7 +57,7 @@ where
     }
 
     fn check(
-        &self,
+        &mut self,
         initial_msg: (A, A),
         challenge: E,
         response: (E, Z, E, Z),
@@ -84,7 +84,7 @@ where
         Ok(())
     }
 
-    fn simulate(&self, challenge: &E) -> ((A, A), (E, Z, E, Z)) {
+    fn simulate(&mut self, challenge: &E) -> ((A, A), (E, Z, E, Z)) {
         let e0 = self.protocols.0.challenge();
         let e1 = challenge.clone() ^ e0.clone();
         let (a0, z0) = self.protocols.0.simulate(&e0);
@@ -139,7 +139,7 @@ mod tests {
     #[test]
     fn simulator_is_accepted() {
         let (instance, _) = make_instance();
-        let protocol = SchnorrOrProtocol::new(instance, None);
+        let mut protocol = SchnorrOrProtocol::new(instance, None);
 
         let e = BigInt::from(675);
         let (a, z) = protocol.simulate(&e);

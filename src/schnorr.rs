@@ -3,8 +3,10 @@ use crate::SigmaProtocol;
 use num::{
     bigint::{BigInt, RandBigInt},
     integer::Integer,
-    Zero,
+    BigUint, One, Zero,
 };
+use num_primes::{Generator, Verification};
+use rand::thread_rng;
 
 #[derive(Debug, Clone)]
 pub struct SchnorrDiscreteLogInstance {
@@ -20,8 +22,35 @@ impl SchnorrDiscreteLogInstance {
     }
 
     /// Generate a Schnorr protocol instance and a corresponding witness.
-    pub fn generate() -> (Self, BigInt) {
-        todo!()
+    ///
+    /// We generate a Schnorr group (https://crypto.stackexchange.com/questions/72811/the-definition-and-origin-of-schnorr-groups),
+    /// choose a random `w`, and derive `h` from that.
+    pub fn generate(p_size: usize, q_size: usize) -> (Self, BigInt) {
+        let q = Generator::new_prime(q_size);
+
+        // Choose `r` randomly until `p := qr + 1` is a prime
+        let mut rng = thread_rng();
+        let (p, r) = loop {
+            let r = rng.gen_biguint(p_size - q_size);
+            let p = &q * &r + BigUint::one();
+            if Verification::is_prime(&p) {
+                break (p, r);
+            }
+        };
+
+        // Choose h randomly until g := h^r !== 1 (mod p)
+        let g = loop {
+            let h = rng.gen_biguint_below(&p);
+            let g = h.modpow(&r, &p);
+            if g != BigUint::one() {
+                break g;
+            }
+        };
+
+        let w = rng.gen_biguint_below(&q);
+        let h = g.modpow(&w, &p);
+
+        (Self::new(p.into(), q.into(), g.into(), h.into()), w.into())
     }
 }
 
@@ -59,7 +88,7 @@ impl SigmaProtocol<SchnorrDiscreteLogInstance, BigInt, BigInt, BigInt, BigInt>
         a
     }
 
-    fn challenge(&self) -> BigInt {
+    fn challenge(&mut self) -> BigInt {
         let t = BigInt::from(self.instance.q.bits() - 1);
         // TODO: Maybe check that this is valid
         let ubound = BigInt::from(2).modpow(&t, &self.instance.q);
@@ -68,7 +97,7 @@ impl SigmaProtocol<SchnorrDiscreteLogInstance, BigInt, BigInt, BigInt, BigInt>
         rng.gen_bigint_range(&BigInt::from(0), &ubound)
     }
 
-    fn challenge_response(&self, challenge: &BigInt) -> BigInt {
+    fn challenge_response(&mut self, challenge: &BigInt) -> BigInt {
         let r = self
             .random_exponent
             .as_ref()
@@ -82,7 +111,7 @@ impl SigmaProtocol<SchnorrDiscreteLogInstance, BigInt, BigInt, BigInt, BigInt>
     }
 
     fn check(
-        &self,
+        &mut self,
         initial_msg: BigInt,
         challenge: BigInt,
         response: BigInt,
@@ -98,7 +127,7 @@ impl SigmaProtocol<SchnorrDiscreteLogInstance, BigInt, BigInt, BigInt, BigInt>
         }
     }
 
-    fn simulate(&self, challenge: &BigInt) -> (BigInt, BigInt) {
+    fn simulate(&mut self, challenge: &BigInt) -> (BigInt, BigInt) {
         let p = &self.instance.p;
 
         let mut rng = rand::thread_rng();
@@ -144,7 +173,25 @@ mod tests {
         let instance = SchnorrDiscreteLogInstance { p, q, g, h };
 
         let e = BigInt::from(675);
-        let protocol = SchnorrDiscreteLogProtocol::new(instance, None);
+        let mut protocol = SchnorrDiscreteLogProtocol::new(instance, None);
+        let (a, z) = protocol.simulate(&e);
+
+        assert!(protocol.check(a, e, z).is_ok())
+    }
+
+    #[test]
+    fn generated_honest_run_is_accepted() {
+        let (instance, w) = SchnorrDiscreteLogInstance::generate(256, 64);
+        let mut protocol = SchnorrDiscreteLogProtocol::new(instance, Some(w));
+        assert!(protocol.run_protocol().is_ok())
+    }
+
+    #[test]
+    fn generated_simulator_is_accepted() {
+        let (instance, _) = SchnorrDiscreteLogInstance::generate(256, 64);
+
+        let e = BigInt::from(675);
+        let mut protocol = SchnorrDiscreteLogProtocol::new(instance, None);
         let (a, z) = protocol.simulate(&e);
 
         assert!(protocol.check(a, e, z).is_ok())

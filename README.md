@@ -11,5 +11,6 @@ Rust implementations of [Sigma protocols](https://en.wikipedia.org/wiki/Proof_of
 
 ### Applications
 
+- [ ] Running remotely
 - [ ] Basic identification scheme
 - [ ] Basic commitment scheme

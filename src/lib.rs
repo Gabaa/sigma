@@ -1,3 +1,4 @@
+pub mod applications;
 pub mod or;
 pub mod remote;
 pub mod schnorr;

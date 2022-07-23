@@ -89,6 +89,10 @@ mod tests {
 
     #[test]
     fn reject_fake_commitment() {
-        todo!("test not implemented")
+        let (instance, _) = CommitmentScheme::gen_params(256, 32);
+        let scheme = CommitmentScheme::new(instance);
+        let e = BigInt::from(10);
+        let (a, z) = (BigInt::from(20), BigInt::from(30));
+        assert!(!scheme.verify(&a, &e, &z))
     }
 }

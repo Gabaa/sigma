@@ -23,8 +23,10 @@ impl SchnorrDiscreteLogInstance {
 
     /// Generate a Schnorr protocol instance and a corresponding witness.
     ///
-    /// We generate a Schnorr group (https://crypto.stackexchange.com/questions/72811/the-definition-and-origin-of-schnorr-groups),
+    /// We generate a [Schnorr group](https://crypto.stackexchange.com/questions/72811/the-definition-and-origin-of-schnorr-groups),
     /// choose a random `w`, and derive `h` from that.
+    ///
+    /// This implementation is very basic and could probably be greatly improved.
     pub fn generate(p_size: usize, q_size: usize) -> (Self, BigInt) {
         let q = Generator::new_prime(q_size);
 

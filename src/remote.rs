@@ -188,12 +188,11 @@ mod tests {
 
     use super::{RemoteProverProtocol, RemoteVerifierProtocol};
 
-    #[test]
-    fn honest_run_works_locally() -> io::Result<()> {
+    fn perform_honest_run_in_threads(p_size: usize, q_size: usize) -> io::Result<()> {
         let listener = TcpListener::bind("127.0.0.1:0")?;
         let listener_addr = listener.local_addr().unwrap();
 
-        let (instance, witness) = SchnorrDiscreteLogInstance::generate(1024, 128);
+        let (instance, witness) = SchnorrDiscreteLogInstance::generate(p_size, q_size);
         let instance_clone = instance.clone();
 
         // Start thread to handle listener/prover
@@ -218,5 +217,16 @@ mod tests {
         verifier_handle.join().unwrap();
 
         Ok(())
+    }
+
+    #[test]
+    fn honest_run_works_locally() -> io::Result<()> {
+        perform_honest_run_in_threads(2 << 8, 2 << 5)
+    }
+
+    #[test]
+    #[ignore = "slow"]
+    fn works_with_secure_params() -> io::Result<()> {
+        perform_honest_run_in_threads(2 << 10, 2 << 7)
     }
 }

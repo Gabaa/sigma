@@ -3,6 +3,7 @@ pub mod or;
 pub mod remote;
 pub mod schnorr;
 
+// TODO: Try to use immutable references for trait functions.
 pub trait SigmaProtocol<X, W, A, E, Z> {
     type VerifierError;
 

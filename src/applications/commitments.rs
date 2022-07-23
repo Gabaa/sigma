@@ -2,7 +2,10 @@
 
 use num::{BigInt, BigUint};
 
-use crate::schnorr::SchnorrDiscreteLogInstance;
+use crate::{
+    schnorr::{SchnorrDiscreteLogInstance, SchnorrDiscreteLogProtocol},
+    SigmaProtocol,
+};
 
 #[derive(Debug)]
 pub struct CommitmentScheme {
@@ -18,12 +21,20 @@ impl CommitmentScheme {
         instance.is_valid()
     }
 
-    pub fn commit(&self, value: BigUint) -> BigUint {
-        todo!("{:?} {}", self.instance, value)
+    pub fn new(instance: SchnorrDiscreteLogInstance) -> Self {
+        CommitmentScheme { instance }
     }
 
-    pub fn verify(&self, a: BigUint, e: BigUint, z: BigUint) -> bool {
-        todo!("{self:?} {a} {e} {z}",)
+    pub fn commit(&self, value: &BigInt) -> (BigInt, BigInt) {
+        let mut protocol = SchnorrDiscreteLogProtocol::new(self.instance.clone(), None);
+        protocol.simulate(value)
+    }
+
+    pub fn verify(&self, a: &BigInt, e: &BigInt, z: &BigInt) -> bool {
+        let mut protocol = SchnorrDiscreteLogProtocol::new(self.instance.clone(), None);
+        protocol
+            .check(a.to_owned(), e.to_owned(), z.to_owned())
+            .is_ok()
     }
 }
 
@@ -57,6 +68,7 @@ mod tests {
 
     #[test]
     fn reject_invalid_params() {
+        // TODO: Should this be tested more thoroughly?
         let instance = SchnorrDiscreteLogInstance::new(
             BigInt::from(1),
             BigInt::from(1),
@@ -68,11 +80,15 @@ mod tests {
 
     #[test]
     fn accept_opened_commitment() {
-        todo!()
+        let (instance, _) = CommitmentScheme::gen_params(256, 32);
+        let scheme = CommitmentScheme::new(instance);
+        let e = BigInt::from(10);
+        let (a, z) = scheme.commit(&e);
+        assert!(scheme.verify(&a, &e, &z))
     }
 
     #[test]
     fn reject_fake_commitment() {
-        todo!()
+        todo!("test not implemented")
     }
 }

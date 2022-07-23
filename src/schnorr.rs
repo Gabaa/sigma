@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use crate::SigmaProtocol;
 
 use num::{
@@ -8,7 +10,7 @@ use num::{
 use num_primes::{Generator, Verification};
 use rand::thread_rng;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SchnorrDiscreteLogInstance {
     p: BigInt,
     q: BigInt,
@@ -53,6 +55,24 @@ impl SchnorrDiscreteLogInstance {
         let h = g.modpow(&w, &p);
 
         (Self::new(p.into(), q.into(), g.into(), h.into()), w.into())
+    }
+
+    /// Check whether this instance is valid.
+    pub fn is_valid(&self) -> bool {
+        Verification::is_prime(&self.p.to_biguint().unwrap())
+            && Verification::is_prime(&self.q.to_biguint().unwrap())
+            && (&self.p - BigInt::from(1)).is_multiple_of(&self.q)
+            && self.g < self.p
+            && self.h < self.p
+    }
+}
+
+impl Debug for SchnorrDiscreteLogInstance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!(
+            "SchnorrDiscreteLogInstance {{ p: {:x}, q: {:x}, g: {:x}, h: {:x} }}",
+            self.p, self.q, self.g, self.h,
+        ))
     }
 }
 

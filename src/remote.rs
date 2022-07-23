@@ -50,6 +50,7 @@ mod remote_verifier {
         stream: TcpStream,
     }
 
+    #[derive(Debug)]
     pub enum ProtocolError<VError> {
         SubProtocolError(VError),
     }
@@ -57,7 +58,6 @@ mod remote_verifier {
     impl<P, X, W, A, E, Z> SigmaProtocol<(X, TcpStream), W, A, E, Z> for Protocol<P>
     where
         P: SigmaProtocol<X, W, A, E, Z>,
-        X: Serialize + DeserializeOwned,
         A: Serialize + DeserializeOwned,
         E: Serialize + DeserializeOwned,
         Z: Serialize + DeserializeOwned,
@@ -118,6 +118,7 @@ mod remote_prover {
         stream: TcpStream,
     }
 
+    #[derive(Debug)]
     pub enum ProtocolError<VError> {
         SubProtocolError(VError),
     }
@@ -125,14 +126,13 @@ mod remote_prover {
     impl<P, X, W, A, E, Z> SigmaProtocol<(X, TcpStream), W, A, E, Z> for Protocol<P>
     where
         P: SigmaProtocol<X, W, A, E, Z>,
-        X: Serialize + DeserializeOwned,
         A: Serialize + DeserializeOwned,
         E: Serialize + DeserializeOwned,
         Z: Serialize + DeserializeOwned,
     {
         type VerifierError = ProtocolError<P::VerifierError>;
 
-        fn new(mut instance: (X, TcpStream), _: Option<W>) -> Self {
+        fn new(instance: (X, TcpStream), _: Option<W>) -> Self {
             Protocol {
                 protocol: P::new(instance.0, None),
                 stream: instance.1,
@@ -175,20 +175,48 @@ mod remote_prover {
 
 #[cfg(test)]
 mod tests {
-    use std::{io, net::TcpListener, thread};
+    use std::{
+        io,
+        net::{TcpListener, TcpStream},
+        thread,
+    };
 
-    use crate::schnorr::SchnorrDiscreteLogInstance;
+    use crate::{
+        schnorr::{SchnorrDiscreteLogInstance, SchnorrDiscreteLogProtocol},
+        SigmaProtocol,
+    };
 
     use super::{RemoteProverProtocol, RemoteVerifierProtocol};
 
     #[test]
-    #[ignore = "until implemented"]
     fn honest_run_works_locally() -> io::Result<()> {
         let listener = TcpListener::bind("127.0.0.1:0")?;
-        let prover_addr = listener.local_addr();
+        let listener_addr = listener.local_addr().unwrap();
 
-        let instance = SchnorrDiscreteLogInstance::generate(256, 64);
+        let (instance, witness) = SchnorrDiscreteLogInstance::generate(1024, 128);
+        let instance_clone = instance.clone();
 
-        todo!("start a stream, maybe with two threads, run verifier in one and prover in other")
+        // Start thread to handle listener/prover
+        let prover_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut protocol: RemoteVerifierProtocol<SchnorrDiscreteLogProtocol> =
+                RemoteVerifierProtocol::new((instance_clone, stream), Some(witness));
+
+            protocol.run_protocol().unwrap();
+        });
+
+        // Start thread to handle verifier
+        let verifier_handle = thread::spawn(move || {
+            let stream = TcpStream::connect(listener_addr).unwrap();
+            let mut protocol: RemoteProverProtocol<SchnorrDiscreteLogProtocol> =
+                RemoteProverProtocol::new((instance, stream), None);
+
+            protocol.run_protocol().unwrap();
+        });
+
+        prover_handle.join().unwrap();
+        verifier_handle.join().unwrap();
+
+        Ok(())
     }
 }

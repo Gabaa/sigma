@@ -1,175 +1,126 @@
-use std::{
-    io::{self, Read, Write},
-    net::TcpStream,
-};
+use std::net::TcpStream;
 
 use serde::{de::DeserializeOwned, Serialize};
 
-pub use remote_prover::{
-    Protocol as RemoteProverProtocol, ProtocolError as RemoteProverProtocolError,
-};
-pub use remote_verifier::{
-    Protocol as RemoteVerifierProtocol, ProtocolError as RemoteVerifierProtocolError,
+use crate::{
+    netutil::{read_value_from_stream, write_value_to_stream},
+    SigmaProtocol,
 };
 
-fn read_value_from_stream<T: DeserializeOwned>(stream: &mut TcpStream) -> io::Result<T> {
-    // Each value is prefixed by 4 bytes specifying the length.
-    let mut buf = [0; 4];
-    stream.read_exact(&mut buf)?;
-    let length = u32::from_be_bytes(buf);
-
-    let mut data = vec![0; length as usize];
-    stream.read_exact(&mut data)?;
-    let s = String::from_utf8(data).map_err(|r| io::Error::new(io::ErrorKind::InvalidData, r))?;
-
-    let val: T = serde_json::from_str(&s)?;
-    Ok(val)
+pub struct RemoteVerifierProtocol<P> {
+    protocol: P,
+    stream: TcpStream,
 }
 
-fn write_value_to_stream<T: Serialize>(stream: &mut TcpStream, value: &T) -> io::Result<()> {
-    let s = serde_json::to_string(value)?;
-    let data = s.as_bytes();
-    let length = data.len() as u32;
-
-    stream.write_all(&length.to_be_bytes())?;
-    stream.write_all(data)?;
-    Ok(())
+#[derive(Debug)]
+pub enum RemoteVerifierProtocolError<VError> {
+    SubProtocolError(VError),
 }
 
-mod remote_verifier {
-    use std::net::TcpStream;
+impl<P, X, W, A, E, Z> SigmaProtocol<(X, TcpStream), W, A, E, Z> for RemoteVerifierProtocol<P>
+where
+    P: SigmaProtocol<X, W, A, E, Z>,
+    A: Serialize + DeserializeOwned,
+    E: Serialize + DeserializeOwned,
+    Z: Serialize + DeserializeOwned,
+{
+    // TODO: Would be nice if this was the actual error
+    type VerifierError = ();
 
-    use serde::{de::DeserializeOwned, Serialize};
-
-    use crate::SigmaProtocol;
-
-    use super::{read_value_from_stream, write_value_to_stream};
-
-    pub struct Protocol<P> {
-        protocol: P,
-        stream: TcpStream,
+    fn new(instance: (X, TcpStream), witness: Option<W>) -> Self {
+        // TODO: I don't like having the stream be part of the instance. Is there another way?
+        RemoteVerifierProtocol {
+            protocol: P::new(instance.0, witness),
+            stream: instance.1,
+        }
     }
 
-    #[derive(Debug)]
-    pub enum ProtocolError<VError> {
-        SubProtocolError(VError),
+    fn initial_message(&mut self) -> A {
+        let a = self.protocol.initial_message();
+        write_value_to_stream(&mut self.stream, &a).unwrap();
+        a
     }
 
-    impl<P, X, W, A, E, Z> SigmaProtocol<(X, TcpStream), W, A, E, Z> for Protocol<P>
-    where
-        P: SigmaProtocol<X, W, A, E, Z>,
-        A: Serialize + DeserializeOwned,
-        E: Serialize + DeserializeOwned,
-        Z: Serialize + DeserializeOwned,
-    {
-        // TODO: Would be nice if this was the actual error
-        type VerifierError = ();
+    fn challenge(&mut self) -> E {
+        read_value_from_stream(&mut self.stream).unwrap()
+    }
 
-        fn new(instance: (X, TcpStream), witness: Option<W>) -> Self {
-            // TODO: I don't like having the stream be part of the instance. Is there another way?
-            Protocol {
-                protocol: P::new(instance.0, witness),
-                stream: instance.1,
-            }
-        }
+    fn challenge_response(&mut self, challenge: &E) -> Z {
+        let z = self.protocol.challenge_response(challenge);
+        write_value_to_stream(&mut self.stream, &z).unwrap();
+        z
+    }
 
-        fn initial_message(&mut self) -> A {
-            let a = self.protocol.initial_message();
-            write_value_to_stream(&mut self.stream, &a).unwrap();
-            a
+    fn check(&mut self, _: A, _: E, _: Z) -> Result<(), Self::VerifierError> {
+        let accepted: bool = read_value_from_stream(&mut self.stream).unwrap();
+        if accepted {
+            Ok(())
+        } else {
+            Err(())
         }
+    }
 
-        fn challenge(&mut self) -> E {
-            read_value_from_stream(&mut self.stream).unwrap()
-        }
-
-        fn challenge_response(&mut self, challenge: &E) -> Z {
-            let z = self.protocol.challenge_response(challenge);
-            write_value_to_stream(&mut self.stream, &z).unwrap();
-            z
-        }
-
-        fn check(&mut self, _: A, _: E, _: Z) -> Result<(), Self::VerifierError> {
-            let accepted: bool = read_value_from_stream(&mut self.stream).unwrap();
-            if accepted {
-                Ok(())
-            } else {
-                Err(())
-            }
-        }
-
-        fn simulate(&mut self, challenge: &E) -> (A, Z) {
-            self.protocol.simulate(challenge)
-        }
+    fn simulate(&mut self, challenge: &E) -> (A, Z) {
+        self.protocol.simulate(challenge)
     }
 }
 
-mod remote_prover {
-    use std::net::TcpStream;
+pub struct RemoteProverProtocol<P> {
+    protocol: P,
+    stream: TcpStream,
+}
 
-    use serde::{de::DeserializeOwned, Serialize};
+#[derive(Debug)]
+pub enum RemoteProverProtocolError<VError> {
+    SubProtocolError(VError),
+}
 
-    use crate::SigmaProtocol;
+impl<P, X, W, A, E, Z> SigmaProtocol<(X, TcpStream), W, A, E, Z> for RemoteProverProtocol<P>
+where
+    P: SigmaProtocol<X, W, A, E, Z>,
+    A: Serialize + DeserializeOwned,
+    E: Serialize + DeserializeOwned,
+    Z: Serialize + DeserializeOwned,
+{
+    type VerifierError = RemoteProverProtocolError<P::VerifierError>;
 
-    use super::{read_value_from_stream, write_value_to_stream};
-
-    pub struct Protocol<P> {
-        protocol: P,
-        stream: TcpStream,
+    fn new(instance: (X, TcpStream), _: Option<W>) -> Self {
+        RemoteProverProtocol {
+            protocol: P::new(instance.0, None),
+            stream: instance.1,
+        }
     }
 
-    #[derive(Debug)]
-    pub enum ProtocolError<VError> {
-        SubProtocolError(VError),
+    fn initial_message(&mut self) -> A {
+        read_value_from_stream(&mut self.stream).unwrap()
     }
 
-    impl<P, X, W, A, E, Z> SigmaProtocol<(X, TcpStream), W, A, E, Z> for Protocol<P>
-    where
-        P: SigmaProtocol<X, W, A, E, Z>,
-        A: Serialize + DeserializeOwned,
-        E: Serialize + DeserializeOwned,
-        Z: Serialize + DeserializeOwned,
-    {
-        type VerifierError = ProtocolError<P::VerifierError>;
+    fn challenge(&mut self) -> E {
+        let e = self.protocol.challenge();
+        write_value_to_stream(&mut self.stream, &e).unwrap();
+        e
+    }
 
-        fn new(instance: (X, TcpStream), _: Option<W>) -> Self {
-            Protocol {
-                protocol: P::new(instance.0, None),
-                stream: instance.1,
-            }
-        }
+    fn challenge_response(&mut self, _: &E) -> Z {
+        read_value_from_stream(&mut self.stream).unwrap()
+    }
 
-        fn initial_message(&mut self) -> A {
-            read_value_from_stream(&mut self.stream).unwrap()
-        }
+    fn check(
+        &mut self,
+        initial_msg: A,
+        challenge: E,
+        response: Z,
+    ) -> Result<(), Self::VerifierError> {
+        let res = self
+            .protocol
+            .check(initial_msg, challenge, response)
+            .map_err(RemoteProverProtocolError::SubProtocolError);
+        write_value_to_stream(&mut self.stream, &res.is_ok()).unwrap();
+        res
+    }
 
-        fn challenge(&mut self) -> E {
-            let e = self.protocol.challenge();
-            write_value_to_stream(&mut self.stream, &e).unwrap();
-            e
-        }
-
-        fn challenge_response(&mut self, _: &E) -> Z {
-            read_value_from_stream(&mut self.stream).unwrap()
-        }
-
-        fn check(
-            &mut self,
-            initial_msg: A,
-            challenge: E,
-            response: Z,
-        ) -> Result<(), Self::VerifierError> {
-            let res = self
-                .protocol
-                .check(initial_msg, challenge, response)
-                .map_err(ProtocolError::SubProtocolError);
-            write_value_to_stream(&mut self.stream, &res.is_ok()).unwrap();
-            res
-        }
-
-        fn simulate(&mut self, challenge: &E) -> (A, Z) {
-            self.protocol.simulate(challenge)
-        }
+    fn simulate(&mut self, challenge: &E) -> (A, Z) {
+        self.protocol.simulate(challenge)
     }
 }
 

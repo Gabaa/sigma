@@ -9,8 +9,9 @@ use num::{
 };
 use num_primes::{Generator, Verification};
 use rand::thread_rng;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SchnorrDiscreteLogInstance {
     p: BigInt,
     q: BigInt,

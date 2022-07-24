@@ -1,6 +1,6 @@
 //! Create and verify commitments.
 
-use num::{BigInt, BigUint};
+use num::BigInt;
 
 use crate::{
     schnorr::{SchnorrDiscreteLogInstance, SchnorrDiscreteLogProtocol},
@@ -13,21 +13,22 @@ pub struct CommitmentScheme {
 }
 
 impl CommitmentScheme {
-    pub fn gen_params(p_size: usize, q_size: usize) -> (SchnorrDiscreteLogInstance, BigInt) {
-        SchnorrDiscreteLogInstance::generate(p_size, q_size)
+    pub fn gen_params(p_size: usize, q_size: usize) -> SchnorrDiscreteLogInstance {
+        SchnorrDiscreteLogInstance::generate(p_size, q_size).0
     }
 
-    pub fn check_params(instance: SchnorrDiscreteLogInstance) -> bool {
+    pub fn check_params(instance: &SchnorrDiscreteLogInstance) -> bool {
         instance.is_valid()
     }
 
     pub fn new(instance: SchnorrDiscreteLogInstance) -> Self {
+        assert!(Self::check_params(&instance));
         CommitmentScheme { instance }
     }
 
-    pub fn commit(&self, value: &BigInt) -> (BigInt, BigInt) {
+    pub fn commit(&self, e: &BigInt) -> (BigInt, BigInt) {
         let mut protocol = SchnorrDiscreteLogProtocol::new(self.instance.clone(), None);
-        protocol.simulate(value)
+        protocol.simulate(e)
     }
 
     pub fn verify(&self, a: &BigInt, e: &BigInt, z: &BigInt) -> bool {
@@ -38,12 +39,12 @@ impl CommitmentScheme {
     }
 }
 
-pub fn encode(s: String) -> BigUint {
-    BigUint::from_bytes_be(s.as_bytes())
+pub fn encode(s: String) -> BigInt {
+    BigInt::from_signed_bytes_be(s.as_bytes())
 }
 
-pub fn decode(i: BigUint) -> String {
-    String::from_utf8(i.to_bytes_be()).unwrap()
+pub fn decode(i: BigInt) -> String {
+    String::from_utf8(i.to_signed_bytes_be()).unwrap()
 }
 
 #[cfg(test)]
@@ -62,8 +63,8 @@ mod tests {
 
     #[test]
     fn generate_valid_params() {
-        let (instance, _) = CommitmentScheme::gen_params(256, 32);
-        assert!(CommitmentScheme::check_params(instance))
+        let instance = CommitmentScheme::gen_params(256, 32);
+        assert!(CommitmentScheme::check_params(&instance))
     }
 
     #[test]
@@ -75,12 +76,12 @@ mod tests {
             BigInt::from(1),
             BigInt::from(1),
         );
-        assert!(!CommitmentScheme::check_params(instance))
+        assert!(!CommitmentScheme::check_params(&instance))
     }
 
     #[test]
     fn accept_opened_commitment() {
-        let (instance, _) = CommitmentScheme::gen_params(256, 32);
+        let instance = CommitmentScheme::gen_params(256, 32);
         let scheme = CommitmentScheme::new(instance);
         let e = BigInt::from(10);
         let (a, z) = scheme.commit(&e);
@@ -89,7 +90,7 @@ mod tests {
 
     #[test]
     fn reject_fake_commitment() {
-        let (instance, _) = CommitmentScheme::gen_params(256, 32);
+        let instance = CommitmentScheme::gen_params(256, 32);
         let scheme = CommitmentScheme::new(instance);
         let e = BigInt::from(10);
         let (a, z) = (BigInt::from(20), BigInt::from(30));

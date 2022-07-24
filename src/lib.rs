@@ -1,4 +1,5 @@
 pub mod applications;
+pub mod netutil;
 pub mod or;
 pub mod remote;
 pub mod schnorr;
